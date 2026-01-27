@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { saveWorkflowToDB, deleteWorkflowFromDB, saveMessageToDB, getWorkflowsFromDB, getMessagesFromDB } from './db'
+import { saveWorkflowToDB, deleteWorkflowFromDB, saveMessageToDB, getWorkflowsFromDB, getMessagesFromDB, subscribeToSessionMessages } from './db'
 import { defaultWorkflow } from './default-workflow'
 
 export interface WorkflowEntry {
@@ -34,6 +34,7 @@ export interface WorkflowState {
     // Session
     sessionId: string
     initializeSession: () => void
+    unsubscribe: () => void // Cleanup function
 
     // Current Workflow State
     workflowJson: any | null
@@ -117,21 +118,21 @@ export const useWorkflowStore = create<WorkflowState>()(
             generationStep: 'Ready',
             settings: defaultSettings,
 
+            unsubscribe: () => { },
             initializeSession: async () => {
                 const currentSession = get().sessionId
+                let sessionIdToUse = currentSession
+
                 if (!currentSession) {
                     const newSession = generateUUID()
                     set({ sessionId: newSession })
-
+                    sessionIdToUse = newSession
                     // Load any public workflows on start
                     get().loadHistory()
                 } else {
-                    // Load messages for this session
+                    // Load messages & history
                     const messages = await getMessagesFromDB(currentSession)
                     if (messages && messages.length > 0) {
-                        // Convert DB messages to local format if needed or use as is
-                        // DB format: { role, content, created_at, ... }
-                        // Local format: { id, role, content, timestamp, ... }
                         const formattedMessages = messages.map((m: any) => ({
                             id: m.id,
                             role: m.role,
@@ -143,6 +144,63 @@ export const useWorkflowStore = create<WorkflowState>()(
                     }
                     get().loadHistory()
                 }
+
+                // Cleanup previous sub if exists
+                get().unsubscribe()
+
+                // Subscribe to Realtime Updates
+                const unsub = subscribeToSessionMessages(sessionIdToUse, (newMessage) => {
+                    const state = get()
+                    // Check if message already exists (optimistic update vs real one)
+                    // Optimistic ones might not have ID or have temp ID, but here strictly checking DB ID might be hard if we don't sync temp IDs.
+                    // For now, let's just append if role is 'assistant' or checks against content/time.
+                    // Simple check: if we have a message with same content and timestamp close by, ignore?
+                    // Better: If we received an 'assistant' message and we are 'generating', turn off generating.
+
+                    if (newMessage.role === 'assistant') {
+                        set({ isGenerating: false, generationStep: 'Ready' })
+                    }
+
+                    // Avoid duplicates if we inserted it ourselves?
+                    // The 'postgres_changes' payload sends what was inserted.
+                    // If we inserted it, it comes back.
+                    // We can check if `state.chatMessages` already has this ID?
+                    // But our optimistic messages don't have DB IDs yet usually.
+
+                    // Simpler logic:
+                    // Only add if it's NOT in our list (by ID) AND (it's not a user message we just sent? User messages are added optimistically).
+                    // Actually, for simplicity, we can rely on DB being truth.
+                    // But for UX, we want instant feedback.
+                    // Let's just focus on ASSISTANT messages for now.
+                    if (newMessage.role === 'assistant') {
+                        const formatted = {
+                            id: newMessage.id,
+                            role: newMessage.role,
+                            content: newMessage.content,
+                            timestamp: new Date(newMessage.created_at),
+                            isError: newMessage.is_error,
+                            workflowJson: newMessage.workflow_json
+                        }
+                        // Check if we already have it
+                        const exists = state.chatMessages.some(m => m.id === newMessage.id)
+                        if (!exists) {
+                            set({ chatMessages: [...state.chatMessages, formatted] })
+
+                            // If this message contains a workflow, update state and history
+                            if (newMessage.workflow_json) {
+                                set({ workflowJson: newMessage.workflow_json })
+                                get().addToHistory({
+                                    id: newMessage.id,
+                                    workflow: newMessage.workflow_json,
+                                    timestamp: new Date(newMessage.created_at).getTime(),
+                                    prompt: state.lastPrompt || "Generated Workflow"
+                                })
+                            }
+                        }
+                    }
+                })
+
+                set({ unsubscribe: unsub })
             },
 
             setWorkflowJson: (json) => set({ workflowJson: json }),

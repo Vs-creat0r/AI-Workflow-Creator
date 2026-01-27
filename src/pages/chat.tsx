@@ -10,14 +10,13 @@ export function ChatPage() {
     const {
         chatMessages,
         setLastPrompt,
-        setWorkflowJson,
-        addToHistory,
         addMessage,
         complexityMode,
         setComplexityMode,
         isGenerating,
         generationStep,
-        setGenerationState
+        setGenerationState,
+        sessionId // Import sessionId
     } = useWorkflowStore()
     const navigate = useNavigate()
 
@@ -76,56 +75,25 @@ export function ChatPage() {
         setGenerationState(true, "Drafting logic...")
 
         try {
-            const response = await sendChatToN8N(userMsg.content, complexityMode)
+            // Async Fire-and-Forget
+            // We pass the sessionId so n8n knows where to send the response back (via Supabase)
+            await sendChatToN8N(textToSend, sessionId, complexityMode)
 
-            let content = "I've generated the workflow for you based on your request."
-            let refinedJson = null
-
-            if (response.error) {
-                content = `Error: ${response.error}`
-            } else if (response.refined_json) {
-                content = `I've created the workflow! You can view it in the Visualizer or download it.`
-
-                try {
-                    refinedJson = JSON.parse(response.refined_json);
-                    setWorkflowJson(refinedJson);
-
-                    addToHistory({
-                        id: Date.now().toString(),
-                        workflow: refinedJson,
-                        timestamp: Date.now(),
-                        prompt: textToSend
-                    })
-                } catch (e) {
-                    console.error("Failed to parse JSON", e);
-                    content += "\n\n(Warning: The generated JSON seems invalid.)";
-                }
-            }
-
-            const botMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "assistant",
-                content: content,
-                timestamp: new Date(),
-                isError: !!response.error,
-                workflowJson: refinedJson // Pass the object directly
-            }
-
-            // Use addMessage to persist to DB
-            addMessage(botMsg)
+            // We do NOT wait for the result here anymore. 
+            // The store subscription will pick up the 'INSERT' from Supabase when n8n finishes.
+            // We also do NOT setGenerationState(false) here; the subscription does that.
 
         } catch (err) {
             console.error(err);
             const errorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: "Something went wrong communicating with the server.",
+                content: "Something went wrong communicating with the server. Please try again.",
                 timestamp: new Date(),
                 isError: true
             }
             addMessage(errorMsg)
-        } finally {
-            setGenerationState(false)
+            setGenerationState(false) // Only turn off if there was a strictly networking/API error
         }
     }
 

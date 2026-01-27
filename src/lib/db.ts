@@ -18,6 +18,7 @@ export interface DBChatMessage {
     is_error?: boolean
     session_id: string
     user_id?: string
+    workflow_json?: any
 }
 
 // Workflows
@@ -100,5 +101,26 @@ export async function getMessagesFromDB(sessionId: string) {
     } catch (err) {
         console.error("Error fetching messages from DB:", err)
         return []
+    }
+}
+// Realtime
+export function subscribeToSessionMessages(sessionId: string, onMessage: (payload: any) => void) {
+    const channel = supabase.channel(`session-${sessionId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'chat_messages',
+                filter: `session_id=eq.${sessionId}`
+            },
+            (payload) => {
+                onMessage(payload.new)
+            }
+        )
+        .subscribe()
+
+    return () => {
+        supabase.removeChannel(channel)
     }
 }

@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api/n8n": {
-        target: "https://n8n.srv1207550.hstgr.cloud",
+        target: "https://n8n.srv1285810.hstgr.cloud",
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/api\/n8n/, ""),

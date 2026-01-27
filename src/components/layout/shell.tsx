@@ -2,7 +2,7 @@
 import { Sidebar, sidebarItems } from "./sidebar"
 import { Outlet, Link, useLocation } from "react-router-dom"
 import { ToastContainer } from "@/components/ui/toast-container"
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Menu, X, Network as NetworkIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -10,13 +10,45 @@ export function Shell() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
     const location = useLocation()
 
+    // Swipe Gesture Handling
+    const touchStart = useRef<number | null>(null)
+    const touchEnd = useRef<number | null>(null)
+
+    const onTouchStart = (e: React.TouchEvent) => {
+        touchEnd.current = null
+        touchStart.current = e.targetTouches[0].clientX
+    }
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        touchEnd.current = e.targetTouches[0].clientX
+    }
+
+    const onTouchEnd = () => {
+        if (!touchStart.current || !touchEnd.current) return
+        const distance = touchStart.current - touchEnd.current
+        const isLeftSwipe = distance > 50
+        const isRightSwipe = distance < -50
+
+        if (isLeftSwipe && isMobileMenuOpen) {
+            setIsMobileMenuOpen(false) // Close on swipe left
+        }
+        if (isRightSwipe && !isMobileMenuOpen) {
+            setIsMobileMenuOpen(true) // Open on swipe right
+        }
+    }
+
     return (
-        <div className="flex h-screen w-full bg-slate-50 dark:bg-slate-950 text-foreground overflow-hidden">
+        <div
+            className="flex h-screen w-full bg-slate-50 dark:bg-slate-950 text-foreground overflow-hidden"
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+        >
             <Sidebar />
 
             <main className="flex-1 h-full relative overflow-hidden flex flex-col">
                 {/* Mobile Header */}
-                <div className="md:hidden flex items-center justify-between p-4 border-b bg-white/50 dark:bg-black/20 backdrop-blur-md z-50">
+                <div className="md:hidden flex items-center justify-between p-4 border-b bg-white/50 dark:bg-black/20 backdrop-blur-md z-50 transition-all duration-300">
                     <Link to="/" className="flex items-center gap-2">
                         <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-gradient-to-tr from-primary to-purple-600 text-white">
                             <NetworkIcon className="h-4 w-4" />
@@ -25,7 +57,7 @@ export function Shell() {
                     </Link>
                     <button
                         onClick={() => setIsMobileMenuOpen(true)}
-                        className="p-2 -mr-2 text-muted-foreground hover:text-foreground"
+                        className="p-2 -mr-2 text-muted-foreground hover:text-foreground active:scale-95 transition-transform"
                     >
                         <Menu className="w-6 h-6" />
                     </button>
@@ -46,7 +78,7 @@ export function Shell() {
                                 <span className="font-semibold text-lg">Menu</span>
                                 <button
                                     onClick={() => setIsMobileMenuOpen(false)}
-                                    className="p-2 -mr-2 text-muted-foreground hover:text-foreground"
+                                    className="p-2 -mr-2 text-muted-foreground hover:text-foreground active:scale-95 transition-transform"
                                 >
                                     <X className="w-5 h-5" />
                                 </button>
@@ -61,7 +93,7 @@ export function Shell() {
                                             to={item.href}
                                             onClick={() => setIsMobileMenuOpen(false)}
                                             className={cn(
-                                                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
+                                                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all active:scale-95",
                                                 isActive
                                                     ? "bg-primary/10 text-primary font-medium"
                                                     : "text-muted-foreground hover:bg-muted"
@@ -73,6 +105,10 @@ export function Shell() {
                                     )
                                 })}
                             </nav>
+
+                            <div className="mt-auto text-center text-xs text-muted-foreground">
+                                Swipe right to open • Left to close
+                            </div>
                         </div>
                     </div>
                 )}
